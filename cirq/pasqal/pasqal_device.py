@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import FrozenSet, Iterable, cast
+from typing import FrozenSet, Iterable
 from numpy import sqrt
 
 import cirq
@@ -38,8 +38,9 @@ class PasqalDevice(cirq.devices.Device):
             ValueError: if the wrong qubit type is provided or if invalid
                 parameter is provided for control_radius. """
         us = cirq.value.Duration(micros=1)
+        ms = cirq.value.Duration(millis=1)
 
-        self._measurement_duration = 5000 * us
+        self._measurement_duration = 5 * ms
         self._gate_duration = 2 * us
         self._max_parallel_z = 2
         self._max_parallel_xy = 2
@@ -54,21 +55,21 @@ class PasqalDevice(cirq.devices.Device):
             raise ValueError("control_radius needs to be a non-negative float")
 
         self.control_radius = control_radius
-
         self.qubits = qubits
 
     def qubit_set(self) -> FrozenSet[cirq.Qid]:
         return frozenset(self.qubits)
 
     def qubit_list(self):
-        return [qubit for qubit in self.qubit_set()]
+        return [qubit for qubit in self.qubits]
 
     def decompose_operation(self,
                             operation: cirq.ops.Operation) -> 'cirq.OP_TREE':
 
         decomposition = [operation]
 
-        if not isinstance(operation, cirq.ops.GateOperation):
+        if not isinstance(operation,
+                          (cirq.ops.GateOperation, cirq.ParallelGateOperation)):
             raise TypeError("{!r} is not a gate operation.".format(operation))
 
         # Try to decompose the operation into elementary device operations
@@ -76,38 +77,17 @@ class PasqalDevice(cirq.devices.Device):
             decomposition = cirq.protocols.decompose(
                 operation, keep=PasqalDevice.is_pasqal_device_op)
 
-        for dec in decomposition:
-            # coverage: ignore
-            if not PasqalDevice.is_pasqal_device_op(dec):
-                raise TypeError("Don't know how to work with {!r}.".format(
-                    operation.gate))
-
         return decomposition
 
     @staticmethod
     def is_pasqal_device_op(op: cirq.ops.Operation) -> bool:
-        if not isinstance(op,
-                          (cirq.ops.GateOperation, cirq.ParallelGateOperation)):
-            return False  # coverage: ignore
 
-        keep = False
-
-        # Currently accepting all multi-qubit operations
-        keep = keep or (len(op.qubits) > 1)
-
-        keep = keep or (isinstance(op.gate, cirq.ops.YPowGate))
-
-        keep = keep or (isinstance(op.gate, cirq.ops.ZPowGate))
-
-        keep = keep or (isinstance(op.gate, cirq.ops.XPowGate))
-
-        keep = keep or (isinstance(op.gate, cirq.ops.PhasedXPowGate))
-
-        keep = keep or (isinstance(op.gate, cirq.ops.MeasurementGate))
-
-        keep = keep or (isinstance(op.gate, cirq.ops.IdentityGate))
-
-        return keep
+        if not isinstance(op, cirq.ops.Operation):
+            raise ValueError('Got unknown operation:', op)
+        return (len(op.qubits) > 1) or isinstance(
+            op.gate, (cirq.ops.IdentityGate, cirq.ops.MeasurementGate,
+                      cirq.ops.PhasedXPowGate, cirq.ops.XPowGate,
+                      cirq.ops.YPowGate, cirq.ops.ZPowGate))
 
     def validate_operation(self, operation: cirq.ops.Operation):
         """
@@ -186,13 +166,19 @@ class PasqalDevice(cirq.devices.Device):
     def distance(self, p: 'cirq.Qid', q: 'cirq.Qid') -> float:
         """
         Returns the distance between two qubits.
+
+        Args:
+            p: qubit involved in the distance computation
+            q: qubit involved in the distance computation
+
+        Returns:
+            The distance between qubits p and q, in lattice spacing units.
+
         """
         if not isinstance(q, ThreeDGridQubit):
-            raise ValueError('Unsupported qubit type: {!r}'.format(q))
+            raise TypeError('Unsupported qubit type: {!r}'.format(q))
         if not isinstance(p, ThreeDGridQubit):
-            raise ValueError('Unsupported qubit type: {!r}'.format(p))
-        p = cast(ThreeDGridQubit, p)
-        q = cast(ThreeDGridQubit, q)
+            raise TypeError('Unsupported qubit type: {!r}'.format(p))
         return sqrt((p.row - q.row)**2 + (p.col - q.col)**2 +
                     (p.lay - q.lay)**2)
 
